@@ -1,0 +1,203 @@
+{
+    "$connections": {
+        "value": {
+            "azureblob": {
+                "connectionId": "/subscriptions/d2bf808c-2a4f-47f2-a32a-2ecbef943fd2/resourceGroups/netconf/providers/Microsoft.Web/connections/azureblob",
+                "connectionName": "azureblob",
+                "id": "/subscriptions/d2bf808c-2a4f-47f2-a32a-2ecbef943fd2/providers/Microsoft.Web/locations/eastus/managedApis/azureblob"
+            },
+            "videoindexer": {
+                "connectionId": "/subscriptions/d2bf808c-2a4f-47f2-a32a-2ecbef943fd2/resourceGroups/netconf/providers/Microsoft.Web/connections/videoindexer",
+                "connectionName": "videoindexer",
+                "id": "/subscriptions/d2bf808c-2a4f-47f2-a32a-2ecbef943fd2/providers/Microsoft.Web/locations/eastus/managedApis/videoindexer"
+            }
+        }
+    },
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "actions": {
+            "Create_blob": {
+                "inputs": {
+                    "body": "@body('HTTP')",
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "path": "/datasets/default/files",
+                    "queries": {
+                        "folderPath": "/output-vtt",
+                        "name": "@{body('Upload_video_and_index_(using_a_URL)')}-transcript.vtt"
+                    }
+                },
+                "runAfter": {
+                    "HTTP": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "contentTransfer": {
+                        "transferMode": "Chunked"
+                    }
+                },
+                "type": "ApiConnection"
+            },
+            "Delete_blob": {
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                        }
+                    },
+                    "method": "delete",
+                    "path": "/datasets/default/files/@{encodeURIComponent(encodeURIComponent(triggerBody()?['Path']))}"
+                },
+                "runAfter": {
+                    "Create_blob": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection"
+            },
+            "Get_the_transcript_(VTT)_url": {
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['videoindexer']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/Api/Partner/Breakdowns/@{encodeURIComponent(body('Upload_video_and_index_(using_a_URL)'))}/VttUrl"
+                },
+                "runAfter": {
+                    "Until_2": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection"
+            },
+            "HTTP": {
+                "inputs": {
+                    "method": "GET",
+                    "uri": "@body('Get_the_transcript_(VTT)_url')"
+                },
+                "runAfter": {
+                    "Get_the_transcript_(VTT)_url": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Http"
+            },
+            "HttpTriggerGetVttWithoutTimeMarks": {
+                "inputs": {
+                    "body": "@json(concat('{\"fileName\":','\"',body('Create_blob')?['Name'],'\"}'))",
+                    "function": {
+                        "id": "/subscriptions/d2bf808c-2a4f-47f2-a32a-2ecbef943fd2/resourceGroups/netconf/providers/Microsoft.Web/sites/netconf-functions/functions/HttpTriggerGetVttWithoutTimeMarks"
+                    },
+                    "method": "POST"
+                },
+                "runAfter": {
+                    "Create_blob": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Function"
+            },
+            "Until_2": {
+                "actions": {
+                    "Delay_2": {
+                        "inputs": {
+                            "interval": {
+                                "count": 5,
+                                "unit": "Second"
+                            }
+                        },
+                        "runAfter": {},
+                        "type": "Wait"
+                    },
+                    "Get_processing_state_2": {
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['videoindexer']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/Api/Partner/Breakdowns/@{encodeURIComponent(body('Upload_video_and_index_(using_a_URL)'))}/State"
+                        },
+                        "runAfter": {
+                            "Delay_2": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "ApiConnection"
+                    }
+                },
+                "expression": "@equals(body('Get_processing_state_2')?['state'], 'Processed')",
+                "limit": {
+                    "count": 60,
+                    "timeout": "PT1H"
+                },
+                "runAfter": {
+                    "Upload_video_and_index_(using_a_URL)": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Until"
+            },
+            "Upload_video_and_index_(using_a_URL)": {
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['videoindexer']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "path": "/Api/Partner/Breakdowns",
+                    "queries": {
+                        "name": "@triggerBody()?['Id']",
+                        "privacy": "Public",
+                        "videoUrl": "https://netconfblob.blob.core.windows.net@{triggerBody()?['Path']}"
+                    }
+                },
+                "runAfter": {},
+                "type": "ApiConnection"
+            }
+        },
+        "contentVersion": "1.0.0.0",
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "defaultValue": {},
+                "type": "Object"
+            }
+        },
+        "triggers": {
+            "Cuando_se_agregan_o_modifican_uno_o_más_blobs_(solo_metadatos)": {
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azureblob']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/datasets/default/triggers/batch/onupdatedfile",
+                    "queries": {
+                        "folderId": "L2lucHV0LWFzc2V0cw==",
+                        "maxFileCount": 10
+                    }
+                },
+                "metadata": {
+                    "L2lucHV0LWFzc2V0cw==": "/input-assets"
+                },
+                "recurrence": {
+                    "frequency": "Minute",
+                    "interval": 1
+                },
+                "splitOn": "@triggerBody()",
+                "type": "ApiConnection"
+            }
+        }
+    }
+}
